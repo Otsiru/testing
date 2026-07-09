@@ -72,7 +72,7 @@ function Home() {
     await createInboxBatch(10, (index, inbox) => {
       const slotId = index + 1;
       setSlots(current => current.map(s => s.id === slotId ? { ...s, email: inbox.address, token: inbox.token, generating: false } : s));
-    }, 150);
+    });
     setGeneratingAll(false);
   };
 
