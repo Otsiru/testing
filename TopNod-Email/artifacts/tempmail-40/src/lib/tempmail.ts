@@ -75,18 +75,15 @@ export const extractVerificationCode = (emails: Email[]): string | null => {
  */
 export const createInboxBatch = async (
   count: number,
-  onCreated: (index: number, inbox: InboxResponse) => void,
-  delayMs: number = 100,
+  onCreated: (index: number, inbox: InboxResponse) => void
 ): Promise<void> => {
-  for (let i = 0; i < count; i++) {
+  const promises = Array.from({ length: count }).map(async (_, i) => {
     try {
       const inbox = await createInbox();
       onCreated(i, inbox);
     } catch (err) {
       console.error(`Failed to create inbox ${i + 1}:`, err);
     }
-    if (i < count - 1 && delayMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-  }
+  });
+  await Promise.all(promises);
 };
