@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Terminal, RefreshCw, Trash2, Shield, Zap, ClipboardList, KeyRound } from 'lucide-react';
+import { Terminal, RefreshCw, Trash2, Shield, Zap, ClipboardList, KeyRound, Loader2 } from 'lucide-react';
 import { SlotGrid, type Slot } from './components/SlotGrid';
 import { ReferralGenerator } from './components/ReferralGenerator';
-import { generateEmail } from './lib/tempmail';
+import { createInboxBatch, type InboxResponse } from './lib/tempmail';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -31,15 +31,17 @@ function Home() {
     Array.from({ length: 40 }, (_, i) => ({
       id: i + 1,
       email: null,
-      domain: 'Auto-Best',
+      token: null,
       code: '',
       loadingCode: false,
+      generating: false,
     }))
   );
 
   const [tipIndex, setTipIndex] = useState(0);
   const [emailsCopied, setEmailsCopied] = useState(false);
   const [codesCopied, setCodesCopied] = useState(false);
+  const [generatingAll, setGeneratingAll] = useState(false);
 
   const doCopy = useCallback((text: string) => {
     navigator.clipboard.writeText(text).catch(() => {
@@ -62,11 +64,19 @@ function Home() {
   const updateSlot = (id: number, updates: Partial<Slot>) =>
     setSlots(current => current.map(s => s.id === id ? { ...s, ...updates } : s));
 
-  const generateAll = () =>
-    setSlots(current => current.map(s => ({ ...s, email: generateEmail(s.domain), code: '', loadingCode: false })));
+  const generateAll = async () => {
+    if (generatingAll) return;
+    setGeneratingAll(true);
+    setSlots(current => current.map(s => ({ ...s, email: null, token: null, code: '', loadingCode: false, generating: true })));
+    await createInboxBatch(40, (index, inbox) => {
+      const slotId = index + 1;
+      setSlots(current => current.map(s => s.id === slotId ? { ...s, email: inbox.address, token: inbox.token, generating: false } : s));
+    }, 150);
+    setGeneratingAll(false);
+  };
 
   const resetAll = () =>
-    setSlots(current => current.map(s => ({ ...s, email: null, code: '', loadingCode: false })));
+    setSlots(current => current.map(s => ({ ...s, email: null, token: null, code: '', loadingCode: false, generating: false })));
 
   const copyAllEmails = () => {
     doCopy(slots.map(s => s.email || '-').join('\n'));
@@ -106,8 +116,9 @@ function Home() {
               <button onClick={resetAll} className="flex cursor-pointer items-center gap-2 px-4 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 rounded-lg text-sm font-semibold transition-all">
                 <Trash2 className="w-4 h-4" /> Reset All
               </button>
-              <button onClick={generateAll} className="flex cursor-pointer items-center gap-2 px-4 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-500 border border-green-500/20 rounded-lg text-sm font-semibold transition-all">
-                <RefreshCw className="w-4 h-4" /> Generate All
+              <button onClick={generateAll} disabled={generatingAll} className="flex cursor-pointer items-center gap-2 px-4 py-2 bg-green-500/10 hover:bg-green-500/20 text-green-500 border border-green-500/20 rounded-lg text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                {generatingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {generatingAll ? 'Generating…' : 'Generate All'}
               </button>
             </div>
           </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Terminal, RefreshCw, Trash2, Shield, Zap, ClipboardList, KeyRound } from 'lucide-react';
+import { Terminal, RefreshCw, Trash2, Shield, Zap, ClipboardList, KeyRound, Loader2 } from 'lucide-react';
 import { SlotGrid, type Slot } from './components/SlotGrid';
-import { generateEmail } from './lib/tempmail';
+import { createInboxBatch, type InboxResponse } from './lib/tempmail';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -29,9 +29,10 @@ function Home() {
     return Array.from({ length: 10 }, (_, i) => ({
       id: i + 1,
       email: null,
-      domain: 'Auto-Best',
+      token: null,
       code: '',
       loadingCode: false,
+      generating: false,
     }));
   });
 
@@ -64,21 +65,25 @@ function Home() {
     setSlots(current => current.map(s => s.id === id ? { ...s, ...updates } : s));
   };
 
-  const generateAll = () => {
-    setSlots(current => current.map(s => ({
-      ...s,
-      email: generateEmail(s.domain),
-      code: '',
-      loadingCode: false,
-    })));
+  const generateAll = async () => {
+    if (generatingAll) return;
+    setGeneratingAll(true);
+    setSlots(current => current.map(s => ({ ...s, email: null, token: null, code: '', loadingCode: false, generating: true })));
+    await createInboxBatch(10, (index, inbox) => {
+      const slotId = index + 1;
+      setSlots(current => current.map(s => s.id === slotId ? { ...s, email: inbox.address, token: inbox.token, generating: false } : s));
+    }, 150);
+    setGeneratingAll(false);
   };
 
   const resetAll = () => {
     setSlots(current => current.map(s => ({
       ...s,
       email: null,
+      token: null,
       code: '',
       loadingCode: false,
+      generating: false,
     })));
   };
 
@@ -133,7 +138,8 @@ function Home() {
                 disabled={generatingAll}
                 className="flex cursor-pointer items-center gap-2 px-4 py-2 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 text-green-500 border border-green-500/20 rounded-lg text-sm font-semibold transition-all disabled:cursor-not-allowed"
               >
-                <RefreshCw className={`w-4 h-4 ${generatingAll ? 'animate-spin' : ''}`} /> Generate All
+                {generatingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {generatingAll ? 'Generating…' : 'Generate All'}
               </button>
             </div>
           </div>

@@ -1,51 +1,92 @@
-export const DOMAINS = [
-  'Auto-Best',
-  'nodkucluk.store',
-  'nodkucluk.online',
-  'nodkucluk.space',
-  'nodkucluk.sbs',
-  'nodkucluk.fun',
-] as const;
+const API_BASE = 'https://api.tempmail.lol/v2';
 
-export type Domain = typeof DOMAINS[number];
+// --- Types ---
 
-const REAL_DOMAINS = DOMAINS.slice(1) as readonly string[];
-
-const NAME_WORDS = [
-  'budi', 'adi', 'reza', 'fajar', 'dian', 'rian', 'eko', 'agus', 'hendra', 'toni',
-  'yudi', 'andi', 'bayu', 'doni', 'gilang', 'hadi', 'ivan', 'joko', 'kevin', 'luki',
-  'mario', 'nando', 'rafi', 'sandi', 'taruna', 'surya', 'rama', 'dewa', 'arya', 'yoga',
-  'febri', 'rizki', 'fauzi', 'irfan', 'wahyu', 'galih', 'aziz', 'hamid', 'fikri', 'andra',
-];
-
-const NAME_SUFFIXES = [
-  'ja', 'na', 'ta', 'ra', 'ka', 'sa', 'da', 'ma', 'wa', 'to',
-  'no', 'di', 'wo', 'ri', 'ro', 'ni', 'nto', 'ndi', 'nta', 'wi',
-];
-
-const pick = <T>(arr: readonly T[]): T =>
-  arr[Math.floor(Math.random() * arr.length)];
-
-export const generateUsername = (): string => {
-  const word = pick(NAME_WORDS);
-  const suffix = Math.random() > 0.4 ? pick(NAME_SUFFIXES) : '';
-  const digits = Math.floor(Math.random() * 9000) + 1000;
-  return `${word}${suffix}${digits}`;
+export type InboxResponse = {
+  address: string;
+  token: string;
 };
 
-const randomDomain = () => pick(REAL_DOMAINS);
-
-export const generateEmail = (domain: string = 'Auto-Best') => {
-  const username = generateUsername();
-  const resolved = domain === 'Auto-Best' ? randomDomain() : domain;
-  return `${username}@${resolved}`;
+export type Email = {
+  from: string;
+  to: string;
+  subject: string;
+  body: string;
+  html: string | null;
+  date: number;
+  ip: string;
 };
 
-export const fetchVerificationCode = async (
-  email: string
-): Promise<{ code: string | null; count: number; subject?: string }> => {
-  const url = `/api/inbox?address=${encodeURIComponent(email)}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Proxy error ${res.status}`);
+// --- API Functions ---
+
+/**
+ * Create a new temporary inbox via TempMail.lol API.
+ * Free tier: no API key required, inbox expires after 1 hour.
+ */
+export const createInbox = async (): Promise<InboxResponse> => {
+  const res = await fetch(`${API_BASE}/inbox/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) throw new Error(`Failed to create inbox: ${res.status}`);
   return res.json();
+};
+
+/**
+ * Check inbox for new emails using the token returned from createInbox.
+ * Returns array of Email objects, or null if inbox has expired.
+ */
+export const checkInbox = async (token: string): Promise<Email[] | null> => {
+  const res = await fetch(`${API_BASE}/inbox?token=${encodeURIComponent(token)}`);
+  if (!res.ok) {
+    if (res.status === 404) return null; // inbox expired
+    throw new Error(`Failed to check inbox: ${res.status}`);
+  }
+  const data = await res.json();
+  return Array.isArray(data) ? data : null;
+};
+
+/**
+ * Extract a verification code (4–8 digit number) from emails.
+ * Scans subject first, then body/html.
+ */
+export const extractVerificationCode = (emails: Email[]): string | null => {
+  for (const email of emails) {
+    // Check subject first (most common place for short codes)
+    const subjectMatch = email.subject?.match(/\b(\d{4,8})\b/);
+    if (subjectMatch) return subjectMatch[1];
+
+    // Then check body
+    const text = email.body || '';
+    const bodyMatch = text.match(/\b(\d{4,8})\b/);
+    if (bodyMatch) return bodyMatch[1];
+
+    // Then check HTML content
+    if (email.html) {
+      const htmlMatch = email.html.match(/\b(\d{4,8})\b/);
+      if (htmlMatch) return htmlMatch[1];
+    }
+  }
+  return null;
+};
+
+/**
+ * Batch create multiple inboxes with a small delay to avoid rate limiting.
+ */
+export const createInboxBatch = async (
+  count: number,
+  onCreated: (index: number, inbox: InboxResponse) => void,
+  delayMs: number = 100,
+): Promise<void> => {
+  for (let i = 0; i < count; i++) {
+    try {
+      const inbox = await createInbox();
+      onCreated(i, inbox);
+    } catch (err) {
+      console.error(`Failed to create inbox ${i + 1}:`, err);
+    }
+    if (i < count - 1 && delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
 };

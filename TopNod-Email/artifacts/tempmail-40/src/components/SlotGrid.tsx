@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Copy, RefreshCw, Zap, Check, Mail } from 'lucide-react';
-import { DOMAINS, generateEmail, fetchVerificationCode } from '../lib/tempmail';
+import { Copy, RefreshCw, Zap, Check, Mail, Loader2 } from 'lucide-react';
+import { createInbox, checkInbox, extractVerificationCode } from '../lib/tempmail';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export type Slot = {
   id: number;
   email: string | null;
-  domain: string;
+  token: string | null;
   code: string;
   loadingCode: boolean;
+  generating: boolean;
 };
 
 interface SlotGridProps {
@@ -39,7 +40,7 @@ function copyToClipboard(text: string) {
   });
 }
 
-const POLL_INTERVAL_MS = 2000;
+const POLL_INTERVAL_MS = 3000;
 
 function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, updates: Partial<Slot>) => void }) {
   const [emailCopied, setEmailCopied] = useState(false);
@@ -49,20 +50,23 @@ function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, u
   const [manualLoading, setManualLoading] = useState(false);
 
   const inFlightRef = useRef(false);
-  const emailRef = useRef(slot.email);
+  const tokenRef = useRef(slot.token);
   const codeRef = useRef(slot.code);
 
-  useEffect(() => { emailRef.current = slot.email; }, [slot.email]);
+  useEffect(() => { tokenRef.current = slot.token; }, [slot.token]);
   useEffect(() => { codeRef.current = slot.code; }, [slot.code]);
 
-  const doFetch = useCallback(async (email: string) => {
+  const doFetch = useCallback(async (token: string) => {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const result = await fetchVerificationCode(email);
+      const emails = await checkInbox(token);
       setLastChecked(new Date());
-      if (emailRef.current === email && result.code) {
-        updateSlot(slot.id, { code: result.code });
+      if (emails && emails.length > 0 && tokenRef.current === token) {
+        const code = extractVerificationCode(emails);
+        if (code) {
+          updateSlot(slot.id, { code });
+        }
       }
     } catch {
       // silent — polling will retry
@@ -71,19 +75,20 @@ function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, u
     }
   }, [slot.id, updateSlot]);
 
+  // Auto-poll when token exists and no code yet
   useEffect(() => {
-    if (!slot.email || slot.code) { setPolling(false); return; }
+    if (!slot.token || slot.code) { setPolling(false); return; }
     setPolling(true);
-    doFetch(slot.email);
+    doFetch(slot.token);
     const id = setInterval(() => {
-      const email = emailRef.current;
+      const token = tokenRef.current;
       const code = codeRef.current;
-      if (!email || code) { clearInterval(id); setPolling(false); return; }
-      doFetch(email);
+      if (!token || code) { clearInterval(id); setPolling(false); return; }
+      doFetch(token);
     }, POLL_INTERVAL_MS);
     return () => { clearInterval(id); setPolling(false); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slot.email]);
+  }, [slot.token]);
 
   useEffect(() => { if (slot.code) setPolling(false); }, [slot.code]);
 
@@ -101,26 +106,32 @@ function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, u
     setTimeout(() => setCodeCopied(false), 1500);
   };
 
-  const handleDomainChange = (newDomain: string) => {
-    updateSlot(slot.id, { domain: newDomain, email: null, code: '', loadingCode: false });
+  const handleGenerate = async () => {
+    if (slot.generating) return;
+    updateSlot(slot.id, { generating: true, email: null, token: null, code: '', loadingCode: false });
     setLastChecked(null);
-  };
-
-  const handleGenerate = () => {
-    updateSlot(slot.id, { email: generateEmail(slot.domain), code: '', loadingCode: false });
-    setLastChecked(null);
+    try {
+      const inbox = await createInbox();
+      updateSlot(slot.id, { email: inbox.address, token: inbox.token, generating: false });
+    } catch (err) {
+      console.error('Failed to create inbox:', err);
+      updateSlot(slot.id, { generating: false });
+    }
   };
 
   const handleManualRefresh = async () => {
-    if (!slot.email || manualLoading) return;
-    const emailAtStart = slot.email;
+    if (!slot.token || manualLoading) return;
+    const tokenAtStart = slot.token;
     setManualLoading(true);
     inFlightRef.current = false;
     try {
-      const result = await fetchVerificationCode(emailAtStart);
+      const emails = await checkInbox(tokenAtStart);
       setLastChecked(new Date());
-      if (emailRef.current === emailAtStart && result.code) {
-        updateSlot(slot.id, { code: result.code });
+      if (emails && emails.length > 0 && tokenRef.current === tokenAtStart) {
+        const code = extractVerificationCode(emails);
+        if (code) {
+          updateSlot(slot.id, { code });
+        }
       }
     } catch { /* ignore */ } finally {
       inFlightRef.current = false;
@@ -134,13 +145,7 @@ function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, u
     <div className="flex flex-col bg-card border border-card-border p-4 rounded-lg shadow-sm hover:border-border transition-colors">
       <div className="flex items-center justify-between mb-3">
         <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Slot {slot.id}</span>
-        <select
-          value={slot.domain}
-          onChange={e => handleDomainChange(e.target.value)}
-          className="bg-background border border-border text-xs py-1 px-2 rounded-md cursor-pointer outline-none focus:border-cyan-500 text-cyan-400 font-mono transition-colors"
-        >
-          {DOMAINS.map(d => <option key={d} value={d}>{d}</option>)}
-        </select>
+        <span className="text-[10px] font-mono text-cyan-600/60 bg-cyan-950/20 px-2 py-0.5 rounded-full border border-cyan-800/20">tempmail.lol</span>
       </div>
 
       <div
@@ -149,9 +154,11 @@ function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, u
         title={slot.email || ''}
       >
         <div className="font-mono text-sm text-foreground truncate mr-3 select-all">
-          {slot.email
-            ? <><span className="text-foreground">{slot.email.split('@')[0]}</span><span className="text-muted-foreground">@</span><span className="text-cyan-400">{activeDomain}</span></>
-            : <span className="text-muted-foreground/40">—</span>}
+          {slot.generating
+            ? <span className="text-muted-foreground/60 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Membuat inbox…</span>
+            : slot.email
+              ? <><span className="text-foreground">{slot.email.split('@')[0]}</span><span className="text-muted-foreground">@</span><span className="text-cyan-400">{activeDomain}</span></>
+              : <span className="text-muted-foreground/40">—</span>}
         </div>
         <AnimatePresence mode="wait">
           {emailCopied
@@ -161,10 +168,11 @@ function SlotCard({ slot, updateSlot }: { slot: Slot; updateSlot: (id: number, u
       </div>
 
       <div className="flex gap-3 mb-3">
-        <button onClick={handleGenerate} className="flex-1 cursor-pointer bg-amber-600/10 hover:bg-amber-600/20 text-amber-500 border border-amber-600/20 hover:border-amber-600/40 font-semibold text-xs py-2 rounded-md flex items-center justify-center gap-1.5 transition-all">
-          <Zap className="w-3.5 h-3.5" /> Generate
+        <button onClick={handleGenerate} disabled={slot.generating} className="flex-1 cursor-pointer bg-amber-600/10 hover:bg-amber-600/20 text-amber-500 border border-amber-600/20 hover:border-amber-600/40 font-semibold text-xs py-2 rounded-md flex items-center justify-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          {slot.generating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+          {slot.generating ? 'Creating…' : 'Generate'}
         </button>
-        <button onClick={handleManualRefresh} disabled={!slot.email || manualLoading} className="flex-1 cursor-pointer bg-cyan-600 hover:bg-cyan-500 disabled:bg-secondary disabled:text-muted-foreground disabled:border-transparent text-white font-semibold text-xs py-2 rounded-md flex items-center justify-center gap-1.5 transition-all border border-cyan-500/20 disabled:cursor-not-allowed">
+        <button onClick={handleManualRefresh} disabled={!slot.token || manualLoading} className="flex-1 cursor-pointer bg-cyan-600 hover:bg-cyan-500 disabled:bg-secondary disabled:text-muted-foreground disabled:border-transparent text-white font-semibold text-xs py-2 rounded-md flex items-center justify-center gap-1.5 transition-all border border-cyan-500/20 disabled:cursor-not-allowed">
           {manualLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
           {manualLoading ? 'Mengambil…' : 'Inbox'}
         </button>
