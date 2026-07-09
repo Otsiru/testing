@@ -77,13 +77,17 @@ export const createInboxBatch = async (
   count: number,
   onCreated: (index: number, inbox: InboxResponse) => void
 ): Promise<void> => {
-  const promises = Array.from({ length: count }).map(async (_, i) => {
-    try {
-      const inbox = await createInbox();
-      onCreated(i, inbox);
-    } catch (err) {
-      console.error(`Failed to create inbox ${i + 1}:`, err);
-    }
-  });
-  await Promise.all(promises);
+  const concurrency = 10;
+  for (let i = 0; i < count; i += concurrency) {
+    const chunk = Array.from({ length: Math.min(concurrency, count - i) }).map(async (_, j) => {
+      const index = i + j;
+      try {
+        const inbox = await createInbox();
+        onCreated(index, inbox);
+      } catch (err) {
+        console.error(`Failed to create inbox ${index + 1}:`, err);
+      }
+    });
+    await Promise.all(chunk);
+  }
 };
