@@ -1,4 +1,4 @@
-const API_BASE = 'https://api.tempmail.lol/v2';
+const API_BASE = '/api/tempmail';
 
 // --- Types ---
 
