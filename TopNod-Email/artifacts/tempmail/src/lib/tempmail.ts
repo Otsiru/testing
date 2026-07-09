@@ -43,7 +43,7 @@ export const checkInbox = async (token: string): Promise<Email[] | null> => {
     throw new Error(`Failed to check inbox: ${res.status}`);
   }
   const data = await res.json();
-  return Array.isArray(data) ? data : null;
+  return data && Array.isArray(data.emails) ? data.emails : null;
 };
 
 /**
